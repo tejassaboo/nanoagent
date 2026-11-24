@@ -28,6 +28,10 @@ class NanoAgentConfig(Config):
     skills: str | None = MISSING
     context_files: list[str] = MISSING
     events: str | None = MISSING
+    # The company policy a plugin agent sees: "off" (none, the baseline), "full" (the plugin's whole
+    # policy.txt) or a method name from nanoagent.plugin.policy.METHODS (a compressed policy.txt).
+    # Only plugin agent and decide tasks read it; every method uses the same model and tools.
+    policy: str = "off"
 
     def runtime(self, *, system_prompt: str) -> AgentConfig:
         return AgentConfig(

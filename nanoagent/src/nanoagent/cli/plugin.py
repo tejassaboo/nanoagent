@@ -44,6 +44,7 @@ from nanoagent.plugin.authoring import check_plugin, migrate
 from nanoagent.plugin.dataflow import Decider
 from nanoagent.plugin.manifest import TaskDefinition
 from nanoagent.plugin.package import pack
+from nanoagent.plugin.policy import with_policy
 from nanoagent.plugin.scaffold import create_plugin
 from nanoagent.plugin.tasks import ModelDecider, run_task
 from nanoagent.plugin.verifier import Verification
@@ -219,11 +220,12 @@ class PluginAgent(Run):
 
     def main(self) -> int:
         manifest, task = _task(self.config, {"agent", "decide"})
+        policy = self.config.harness.policy
 
         def make_agent(system_prompt: str) -> Agent:
             definition = AgentDefinitionConfig(
                 model=self.config.llm.runtime(),
-                agent=self.config.harness.runtime(system_prompt=system_prompt),
+                agent=self.config.harness.runtime(system_prompt=with_policy(system_prompt, manifest.root, policy)),
                 tools=[],
                 tools_dir=None,
                 allowed_tools=None,
@@ -236,7 +238,7 @@ class PluginAgent(Run):
             harness = self.config.harness
             return ModelDecider(
                 Model.from_config(self.config.llm.runtime()),
-                system_prompt,
+                with_policy(system_prompt, manifest.root, policy),
                 max_steps=harness.max_steps,
                 cost_limit=harness.cost_limit,
                 token_limit=harness.token_limit,
