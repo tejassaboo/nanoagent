@@ -14,6 +14,7 @@ from pathlib import Path
 from nanoagent.plugin import bloom_filter, policy_select
 
 POLICY_FILE = "policy.txt"
+BUNDLED_POLICY_FILE = "src/plugin/data/policy.txt"
 TITLE = "Company travel policy"
 
 
@@ -46,16 +47,34 @@ def policy_text(root: Path, policy: str, task_text: str) -> str:
             raise ValueError(f"policy {policy!r}: the fraction after bm25_frac: must be in (0, 1]")
     elif policy != "full" and policy not in METHODS:
         raise ValueError(f"unknown policy {policy!r}: use off, full, bm25_frac:<fraction> or one of {sorted(METHODS)}")
-    handbook_path = root / POLICY_FILE
-    if not handbook_path.is_file():
-        raise FileNotFoundError(f"policy={policy!r} needs {handbook_path}")
-    handbook = handbook_path.read_text()
+    handbook = handbook_path(root, policy).read_text()
     if fraction is not None:
         return policy_select.bm25_frac(handbook, task_text, fraction)
     return handbook if policy == "full" else METHODS[policy](handbook, task_text)
 
 
-def with_policy(system_prompt: str, root: Path, policy: str) -> str:
-    """``system_prompt`` with the policy section added, unchanged when ``policy`` is ``off``."""
-    text = policy_text(root, policy, system_prompt)
+def handbook_path(root: Path, policy: str) -> Path:
+    """The plugin's handbook: ``policy.txt`` at its root, else bundled as ``src/plugin/data/policy.txt``
+    (a layout stock ``nanoagent plugin inspect`` accepts)."""
+    for path in (root / POLICY_FILE, root / BUNDLED_POLICY_FILE):
+        if path.is_file():
+            return path
+    raise FileNotFoundError(f"policy={policy!r} needs {root / POLICY_FILE} or {root / BUNDLED_POLICY_FILE}")
+
+
+def selection_query(system_prompt: str, task_input: str, query: str) -> str:
+    """What a method selects for: the system prompt (``instructions``), or the task's input message
+    and its instructions (``instructions+input``). The input goes first, so the instructions' last
+    section, which a method may cut to the end of the text ("Rules not in scope"), cannot take it."""
+    if query == "instructions":
+        return system_prompt
+    if query == "instructions+input":
+        return f"{task_input}\n\n{policy_select.task_portion(system_prompt)}"
+    raise ValueError(f"unknown query {query!r}: use instructions or instructions+input")
+
+
+def with_policy(system_prompt: str, root: Path, policy: str, query_text: str | None = None) -> str:
+    """``system_prompt`` with the policy section added, unchanged when ``policy`` is ``off``.
+    A method selects for ``query_text`` (default: the system prompt itself)."""
+    text = policy_text(root, policy, system_prompt if query_text is None else query_text)
     return f"{system_prompt}\n\n## {TITLE}\n\n{text.strip()}" if text.strip() else system_prompt

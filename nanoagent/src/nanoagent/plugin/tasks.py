@@ -174,7 +174,7 @@ async def run_task(
     arguments: dict[str, Any],
     workspace: Path,
     *,
-    make_agent: Callable[[str], Agent] | None,
+    make_agent: Callable[[str, str], Agent] | None,
     make_decider: Callable[[str], Decider] | None,
     timeout: float,
     on_event: TaskEvents,
@@ -183,7 +183,8 @@ async def run_task(
 ) -> TaskOutcome:
     """Run ``task`` in ``workspace`` and judge it.
 
-    ``make_agent(system_prompt)`` builds the agent for an agent task, and ``make_decider(system_prompt)``
+    ``make_agent(system_prompt, task_input)`` builds the agent for an agent task, given the system
+    prompt and the opening user message it will get, and ``make_decider(system_prompt)``
     the decider for a decide task (each None when the task does not need it).
     ``stage(folder)`` puts the task's input files into a workspace before anything reads them;
     it is called for ``workspace`` and for the reference tool's scratch workspace.
@@ -204,7 +205,7 @@ async def _run(
     task: TaskDefinition,
     arguments: dict[str, Any],
     workspace: Path,
-    make_agent: Callable[[str], Agent] | None,
+    make_agent: Callable[[str, str], Agent] | None,
     make_decider: Callable[[str], Decider] | None,
     timeout: float,
     on_event: TaskEvents,
@@ -226,8 +227,9 @@ async def _run(
                 raise ValueError(f"task {task.id!r} is an agent task: it needs an agent")
             reference = await _pin_reference(manifest, task, arguments, timeout, on_event, stage, graph, pinned_reference)
             system, user = task_prompt(manifest, task, arguments)
-            graph.value("system", NodeType.SYSTEM_PROMPT, PARTS[NodeType.SYSTEM_PROMPT].label, system)
-            agent = make_agent(system)
+            agent = make_agent(system, user)
+            # The prompt the agent was built with, which may add to `system` (a policy, skills).
+            graph.value("system", NodeType.SYSTEM_PROMPT, PARTS[NodeType.SYSTEM_PROMPT].label, agent.system_prompt)
             submit = SubmitTool(task)
             agent.add_tool(submit)
             reported = 0

@@ -32,6 +32,28 @@ class NanoAgentConfig(Config):
     # policy.txt) or a method name from nanoagent.plugin.policy.METHODS (a compressed policy.txt).
     # Only plugin agent and decide tasks read it; every method uses the same model and tools.
     policy: str = "off"
+    # A bot preset that sets every field below at once (nanoagent.plugin.bots.PRESETS): off, full,
+    # full_plus (or full+), vanilla, variant, product or optimal. Each field below that is not null
+    # replaces the preset's value; `policy` is the older name of `selector`. Quote "off" in YAML.
+    bot: str = "off"
+    selector: str | None = None  # off, full, bloom, scoped, rule_quota, bm25, bm25_frac[:f], bloom_chunk, sketch_bm25
+    idf: str | None = None  # none, exact or cms (a count-min sketch)
+    dedup: str | None = None  # none or minhash (drop near-copies of kept chunks)
+    twin: str | None = None  # sketch, or exact (every sketch swapped for its exact structure)
+    sketch_opts: list[str] | None = None  # any of probe_sizing, conservative_update, one_permutation, double_hash
+    chunker: str | None = None  # plain or structured
+    budget: str | None = None  # frac:<f>, or frac:<f>,words:<n> (the smaller); null = the selector's own
+    backup: str | None = None  # none, or learned (a learned Bloom filter with a backup filter)
+    stopwords: str | None = None  # none, or light (strip stopwords from the selected text)
+    stop_on_submit: bool | None = None  # end an agent task right after its first accepted submit
+    reasoning_effort: str | None = None  # low, medium or high; null sends nothing
+    seed: int | None = None  # the sketches' hash seed
+    # What a selector reads: the task's instructions (the system prompt), or those and the task's
+    # input message (`instructions+input`; the selection is then made per task input).
+    query: str | None = None
+    # A token cap the run is measured against but not stopped by (e.g. a hosted 65536): the run
+    # records the step at which a run capped there would have stopped. token_limit still stops it.
+    hosted_token_limit: int | None = None
 
     def runtime(self, *, system_prompt: str) -> AgentConfig:
         return AgentConfig(

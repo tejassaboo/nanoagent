@@ -48,10 +48,11 @@ def staged_from(workspace: Path) -> Callable[[Path], None]:
     return stage
 
 
-def task_agent(model: ChatModel, limits: AgentConfig) -> Callable[[str], Agent]:
-    """What builds an agent task's agent: ``model`` within ``limits``, given its system prompt."""
+def task_agent(model: ChatModel, limits: AgentConfig) -> Callable[[str, str], Agent]:
+    """What builds an agent task's agent: ``model`` within ``limits``, given its system prompt (the
+    task input message is not used here)."""
 
-    def make_agent(system_prompt: str) -> Agent:
+    def make_agent(system_prompt: str, task_input: str) -> Agent:
         return Agent(
             model,
             [],
@@ -91,7 +92,7 @@ class TaskTool(Tool):
         manifest: PluginManifest,
         task: TaskDefinition,
         workspace: Path,
-        make_agent: Callable[[str], Agent],
+        make_agent: Callable[[str, str], Agent],
         make_decider: Callable[[str], Decider],
         timeout: float,
         reasoning: bool,

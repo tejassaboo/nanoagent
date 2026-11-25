@@ -12,7 +12,7 @@ rule its author had no chance to meet.
 
 1. The standard layout: every file in :data:`STANDARD_FILES` and folder in
    :data:`STANDARD_FOLDERS`, ``tests/`` holding :data:`VERIFIER_TEST`, the verifier's own test,
-   and nothing else: the top level holds only these (and :data:`TOOL_ARTIFACTS`, which are never
+   and nothing else: the top level holds only these (and :data:`OPTIONAL_FILES`, and :data:`TOOL_ARTIFACTS`, which are never
    packed: what tools create in a checkout, and a coding agent's instructions), ``verifier/``
    only ``.py`` files and ``product/`` only its files. ``src/`` and ``tests/`` are the plugin's own
    to organize.
@@ -45,6 +45,8 @@ from nanoagent.plugin.manifest import MANIFEST, SPEC, SPECS, TOOL_ARTIFACTS, Plu
 TEMPLATE = Path(__file__).with_name("template")
 STANDARD_FILES = (MANIFEST, CONTRACT, "README.md", "LICENSE", "pyproject.toml", "uv.lock", ".gitignore", ".env")
 STANDARD_FOLDERS = ("src", "tests", "verifier", "ui", "product")
+# Root files a plugin may have but need not: the handbook the `harness.policy` switch reads.
+OPTIONAL_FILES = ("policy.txt",)
 VERIFIER_TEST = "tests/test_verifier.py"
 README_SECTIONS = ("## Tools", "## Layout", "## Develop and run")
 PRODUCT = "product/product.yaml"
@@ -96,7 +98,7 @@ def _layout_violations(root: Path) -> list[str]:
     violations += [f"missing {name}/" for name in STANDARD_FOLDERS if not (root / name).is_dir()]
     if (root / "tests").is_dir() and not (root / VERIFIER_TEST).is_file():
         violations.append(f"missing {VERIFIER_TEST}")
-    standard = {*STANDARD_FILES, *STANDARD_FOLDERS, *TOOL_ARTIFACTS}
+    standard = {*STANDARD_FILES, *OPTIONAL_FILES, *STANDARD_FOLDERS, *TOOL_ARTIFACTS}
     violations += [f"unexpected {path.name}" for path in sorted(root.iterdir()) if path.name not in standard]
     if (root / "verifier").is_dir():
         violations += [

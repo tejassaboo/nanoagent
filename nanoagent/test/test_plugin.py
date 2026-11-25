@@ -266,7 +266,7 @@ async def test_an_agent_task_without_a_submission_fails(tmp_path: Path) -> None:
             task,
             {"value": "hi"},
             tmp_path,
-            make_agent=lambda system: Agent(Answers(), [], system_prompt=system),
+            make_agent=lambda system, _input: Agent(Answers(), [], system_prompt=system),
             make_decider=None,
             timeout=30,
             on_event=lambda _kind, _data: None,

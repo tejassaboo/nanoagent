@@ -23,6 +23,7 @@ An agent run's model is on Bedrock (``PluginAgentConfig``) or OpenRouter
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import shutil
 import sys
@@ -39,12 +40,12 @@ from nanoagent.harness.nanoagent import NanoAgentConfig
 from nanoagent.llm.bedrock import BedrockConfig
 from nanoagent.llm.openrouter import OpenRouterConfig
 from nanoagent.core.agent import Agent
-from nanoagent.plugin import PluginError, PluginManifest, load_manifest
+from nanoagent.plugin import PluginError, PluginManifest, bots, load_manifest
 from nanoagent.plugin.authoring import check_plugin, migrate
 from nanoagent.plugin.dataflow import Decider
 from nanoagent.plugin.manifest import TaskDefinition
 from nanoagent.plugin.package import pack
-from nanoagent.plugin.policy import with_policy
+from nanoagent.plugin.policy import handbook_path, selection_query, with_policy
 from nanoagent.plugin.scaffold import create_plugin
 from nanoagent.plugin.tasks import ModelDecider, run_task
 from nanoagent.plugin.verifier import Verification
@@ -220,12 +221,19 @@ class PluginAgent(Run):
 
     def main(self) -> int:
         manifest, task = _task(self.config, {"agent", "decide"})
-        policy = self.config.harness.policy
+        bot = bots.resolve(self.config.harness)
+        bots.check_runnable(bot, task.runner)
+        policy = bots.legacy_policy(bot)
+        # Recorded only when the config sets a switch field, so an upstream config's run is unchanged.
+        record = None if bots.is_upstream(self.config.harness) else self._bot_record(bot, manifest)
+        if record is not None:
+            print(f"harness: {json.dumps(record, sort_keys=True)}")
 
-        def make_agent(system_prompt: str) -> Agent:
+        def make_agent(system_prompt: str, task_input: str) -> Agent:
+            prompt = with_policy(system_prompt, manifest.root, policy, selection_query(system_prompt, task_input, bot.query))
             definition = AgentDefinitionConfig(
                 model=self.config.llm.runtime(),
-                agent=self.config.harness.runtime(system_prompt=with_policy(system_prompt, manifest.root, policy)),
+                agent=self.config.harness.runtime(system_prompt=prompt),
                 tools=[],
                 tools_dir=None,
                 allowed_tools=None,
@@ -259,17 +267,28 @@ class PluginAgent(Run):
         )
         self.layout.result = PluginResult(plugin=manifest.id, task=task.id, output=outcome.output)
         self.layout.reference = PluginReference(tool=task.reference, response=outcome.reference)
-        self.layout.messages = AtifTrajectory.from_dict(
-            to_atif(
-                outcome.agent,
-                session_id=str(uuid.uuid4()),
-                harness="nanoagent",
-                harness_version=__version__,
-                model=self.config.llm.model,
-            )
+        trajectory = to_atif(
+            outcome.agent,
+            session_id=str(uuid.uuid4()),
+            harness="nanoagent",
+            harness_version=__version__,
+            model=self.config.llm.model,
         )
+        if record is not None:
+            cap = self.config.harness.hosted_token_limit
+            if cap is not None:
+                stop = bots.hosted_cap_stop(outcome.agent.profile if outcome.agent is not None else None, cap)
+                record["hosted_cap"] = {"limit": cap, "exceeded": stop is not None, "stops_before_step": stop}
+                print(f"hosted cap: {json.dumps(record['hosted_cap'])}")
+            trajectory["final_metrics"]["extra"]["harness"] = record
+        self.layout.messages = AtifTrajectory.from_dict(trajectory)
         self.layout.verdict = _verdict(task, outcome.verdict)
         return 0 if self.layout.verdict.valid else 1
+
+    def _bot_record(self, bot: bots.Components, manifest: PluginManifest) -> dict[str, Any]:
+        """The bot this run uses (its resolved components and config hash) and the handbook's hash."""
+        handbook = None if bot.selector == "off" else hashlib.sha256(handbook_path(manifest.root, bot.selector).read_bytes()).hexdigest()
+        return bots.provenance(bot, self.config.harness, self.config.llm, handbook)
 
 
 class PluginOpenRouterAgent(PluginAgent):
