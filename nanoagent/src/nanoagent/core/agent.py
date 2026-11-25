@@ -180,6 +180,9 @@ class StopReason(StrEnum):
     (JSON-compatible, comparable to the raw strings in saved trajectories)."""
 
     ANSWER = "answer"  # model returned no tool call — that reply is the final answer
+    # a call to the run's `stop_after_tool` succeeded (e.g. a task's accepted `submit`); its step
+    # is committed like any other, and no further model call is made
+    SUBMITTED = "submitted"
     MAX_STEPS = "max_steps_reached"  # ran out of model turns
     COST_LIMIT = "cost_limit"  # accumulated cost hit the configured cap
     TOKEN_LIMIT = "token_limit"  # accumulated total tokens hit the configured cap
@@ -291,6 +294,7 @@ class Agent:
         messages: list[dict[str, Any]] | None = None,
         on_delta: Callable[[str, str], None] | None = None,
         on_tool: Callable[[dict[str, Any]], None] | None = None,
+        stop_after_tool: str | None = None,
     ) -> AgentResult:
         """Drive the agent until it answers or hits a limit.
 
@@ -310,6 +314,9 @@ class Agent:
         exception the partial result is recorded (``stop_reason="error"``), passed to ``on_step``,
         and re-raised. ``label`` (e.g. the task id) is prefixed to this run's log
         lines so they're attributable when many rollouts log to one console.
+        ``stop_after_tool`` (None: never) ends the run with :attr:`StopReason.SUBMITTED` right after
+        a step in which a call to that tool succeeded (``is_error`` false); a failed call is fed
+        back as usual. Every call of that step, and its result, is kept.
         """
         profiler = Profiler()
         tag = f"[{label}] " if label is not None else ""
@@ -527,6 +534,13 @@ class Agent:
                 )
                 call_log.extend(log_rows)
                 transcript.extend(tool_msgs)
+                if stop_after_tool is not None and any(
+                    row["name"] == stop_after_tool and not row["is_error"] for row in log_rows
+                ):
+                    finish_step()
+                    return _emit(
+                        on_step, result(step + 1, StopReason.SUBMITTED, reply.content or "")
+                    )
                 # Compaction (compact=True) runs at the END of the step, once the assistant turn
                 # and ALL its tool results are in: summarizing mid-step could split a tool call
                 # from its results, which the chat API rejects. Its summarization turn is real

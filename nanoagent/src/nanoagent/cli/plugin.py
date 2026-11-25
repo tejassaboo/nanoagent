@@ -263,6 +263,7 @@ class PluginAgent(Run):
                 timeout=self.config.timeout,
                 on_event=_print_event,
                 stage=lambda folder: stage_inputs(self.config.inputs, folder),
+                stop_on_submit=bot.stop_on_submit,
             )
         )
         self.layout.result = PluginResult(plugin=manifest.id, task=task.id, output=outcome.output)

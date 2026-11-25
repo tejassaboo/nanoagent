@@ -180,6 +180,7 @@ async def run_task(
     on_event: TaskEvents,
     stage: Callable[[Path], None],
     pinned_reference: PinnedReference | None = None,
+    stop_on_submit: bool = False,
 ) -> TaskOutcome:
     """Run ``task`` in ``workspace`` and judge it.
 
@@ -188,6 +189,8 @@ async def run_task(
     the decider for a decide task (each None when the task does not need it).
     ``stage(folder)`` puts the task's input files into a workspace before anything reads them;
     it is called for ``workspace`` and for the reference tool's scratch workspace.
+    ``stop_on_submit`` ends an agent task's run right after its first accepted :data:`SUBMIT`,
+    instead of asking the model once more (a decide task already stops there).
     """
     try:
         build_output(arguments, task.input_type)
@@ -197,7 +200,7 @@ async def run_task(
     # Its provenance graph, each change a task.graph event as it is made.
     graph = Provenance(lambda patch: on_event("task.graph", patch))
     graph.value("input", NodeType.TASK_INPUT, PARTS[NodeType.TASK_INPUT].label, arguments)
-    return await _run(manifest, task, arguments, workspace, make_agent, make_decider, timeout, on_event, stage, graph, pinned_reference)
+    return await _run(manifest, task, arguments, workspace, make_agent, make_decider, timeout, on_event, stage, graph, pinned_reference, stop_on_submit)
 
 
 async def _run(
@@ -212,6 +215,7 @@ async def _run(
     stage: Callable[[Path], None],
     graph: Provenance,
     pinned_reference: PinnedReference | None,
+    stop_on_submit: bool = False,
 ) -> TaskOutcome:
     stage(workspace)
     match task.runner:
@@ -262,7 +266,8 @@ async def _run(
             async with PluginSession(manifest, workspace, timeout=timeout) as session:
                 for tool in plugin_tools(manifest, workspace, task.tools, session=session):
                     agent.add_tool(tool)
-                result = await agent.run(user, on_step=on_step, on_delta=on_delta, on_tool=on_tool)
+                stop = {"stop_after_tool": SUBMIT} if stop_on_submit else {}
+                result = await agent.run(user, on_step=on_step, on_delta=on_delta, on_tool=on_tool, **stop)
             on_event("task.answer", {"text": result.answer})
             if submit.output is None:
                 raise TaskNotSubmitted(f"the agent ended task {task.id!r} without calling {SUBMIT}")

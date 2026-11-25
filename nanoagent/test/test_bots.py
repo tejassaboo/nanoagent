@@ -85,7 +85,7 @@ def test_a_wrong_name_or_value_is_refused(fields: dict, message: str) -> None:
         resolve(harness(**fields))
 
 
-@pytest.mark.parametrize(("bot", "package"), [("vanilla", "WP4"), ("variant", "WP4"), ("product", "WP6"), ("optimal", "WP6"), ("full_plus", "WP2")])
+@pytest.mark.parametrize(("bot", "package"), [("vanilla", "WP4"), ("variant", "WP4"), ("product", "WP6"), ("optimal", "WP6")])
 def test_a_defined_but_unbuilt_component_fails_loudly(bot: str, package: str) -> None:
     with pytest.raises(NotImplementedError, match=f"not implemented yet .*{package}"):
         bots.check_runnable(resolve(harness(bot=bot)), "agent")
@@ -262,6 +262,14 @@ def test_a_bot_run_records_its_components_hash_and_the_hosted_cap(tmp_path: Path
     assert record["hosted_cap"] == {"limit": 65536, "exceeded": True, "stops_before_step": 2}
     log = (home / "run.log").read_text()
     assert f'"config_sha256": "{record["config_sha256"]}"' in log
+
+
+def test_full_plus_stops_at_the_accepted_submit_and_full_asks_once_more(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    plus, home = _agent_run(tmp_path / "plus", monkeypatch, "  bot: full+\n")
+    full, _ = _agent_run(tmp_path / "full", monkeypatch, "  bot: full\n")
+    assert (len(plus.requests), len(full.requests)) == (1, 2)
+    assert plus.requests[0][0] == full.requests[0][0]
+    assert json.loads((home / "messages.json").read_text())["final_metrics"]["extra"]["stop_reason"] == "submitted"
 
 
 def test_a_misspelt_harness_key_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

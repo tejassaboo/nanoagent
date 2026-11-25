@@ -45,7 +45,7 @@ SKETCH_ONLY = ("idf", "dedup", "twin", "sketch_opts", "chunker", "backup", "stop
 BUDGET = re.compile(r"\Afrac:(?P<frac>\d+(?:\.\d+)?)(?:,words:(?P<words>\d+))?\Z")
 _OFF = ("off", "false", "none", "")
 # Components not wired into the run yet, with the package that adds them.
-NOT_YET = {"selector": "WP4 (bloom_chunk) / WP6 (sketch_bm25)", "stop_on_submit": "WP2", "reasoning_effort": "WP3"}
+NOT_YET = {"selector": "WP4 (bloom_chunk) / WP6 (sketch_bm25)", "reasoning_effort": "WP3"}
 
 
 @dataclass(frozen=True)
