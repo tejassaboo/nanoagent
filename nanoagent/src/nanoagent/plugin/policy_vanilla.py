@@ -39,7 +39,7 @@ def weights(query: set[str], chunk_terms: list[set[str]], idf: str, exact: bool,
     if idf == "none":
         return {t: 1.0 for t in query}
     df = ExactCounter() if exact or idf == "exact" else cms(CMS_EPS, CMS_DELTA, salt=f"{seed}:df")
-    for t in (t for terms in chunk_terms for t in terms):
+    for t in (t for terms in chunk_terms for t in sorted(terms)):  # sorted: conservative update is order-sensitive
         df.add(t)
     n = len(chunk_terms)
     return {t: math.log(n / min(n, df.query(t))) if df.query(t) else 0.0 for t in query}
