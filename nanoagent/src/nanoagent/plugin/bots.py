@@ -46,11 +46,8 @@ CHOICES: dict[str, tuple[str, ...]] = {
 SKETCH_ONLY = ("idf", "dedup", "twin", "sketch_opts", "chunker", "backup", "stopwords", "seed")
 BUDGET = re.compile(r"\Afrac:(?P<frac>\d+(?:\.\d+)?)(?:,words:(?P<words>\d+))?\Z")
 _OFF = ("off", "false", "none", "")
-# Selectors defined here but not run yet, with the package that adds them.
-NOT_YET = {"sketch_bm25": "WP6"}
-# The components bloom_chunk reads (each must be set), and values it does not run yet, with their package.
+# The components bloom_chunk reads (each must be set).
 BLOOM_CHUNK_READS = ("idf", "dedup", "twin", "chunker", "budget", "seed")
-NOT_YET_IN_BLOOM_CHUNK = {"stopwords": "WP6"}
 
 
 @dataclass(frozen=True)
@@ -160,27 +157,43 @@ def resolve(h: NanoAgentConfig) -> Components:
     return components
 
 
-def legacy_policy(c: Components) -> str:
-    """The ``nanoagent.plugin.policy`` method name for a legacy selector (``bm25`` with a budget is ``bm25_frac``)."""
+def legacy_policy(c: Components) -> str | Callable[[str, str], str]:
+    """The ``nanoagent.plugin.policy`` method name for a legacy selector (``bm25`` with a budget is ``bm25_frac``,
+    and with a word cap :func:`nanoagent.plugin.policy_product.bm25_budget`)."""
     if c.selector == "bm25" and c.budget is not None:
         match = BUDGET.match(c.budget)
         assert match is not None  # _check
         if match["words"] is not None:
-            raise NotImplementedError("harness.budget words:<n> is not implemented for selector bm25 yet (WP6)")
+            from nanoagent.plugin import policy_product
+
+            return functools.partial(policy_product.bm25_budget, fraction=float(match["frac"]), max_words=int(match["words"]))
         return f"bm25_frac:{match['frac']}"
     return c.selector
 
 
 def method(c: Components) -> str | Callable[[str, str], str]:
-    """What :func:`nanoagent.plugin.policy.with_policy` runs: a legacy method name, or for ``bloom_chunk``
-    the vanilla selector (:func:`nanoagent.plugin.policy_vanilla.select`) with ``c``'s components."""
-    if c.selector != "bloom_chunk":
+    """What :func:`nanoagent.plugin.policy.with_policy` runs: a legacy method name, or a sketch selector with
+    ``c``'s components; ``stopwords: light`` strips its text (:func:`nanoagent.plugin.policy_product.strip_light`)."""
+    inner = _selector(c)
+    if c.stopwords != "light":
+        return inner
+    from nanoagent.plugin import policy_product
+
+    return functools.partial(policy_product.stripped, inner)
+
+
+def _selector(c: Components) -> str | Callable[[str, str], str]:
+    """The selector alone: ``bloom_chunk`` is :func:`nanoagent.plugin.policy_vanilla.select`, ``sketch_bm25``
+    :func:`nanoagent.plugin.policy_product.select`."""
+    if c.selector not in SKETCH_SELECTORS:
         return legacy_policy(c)
-    from nanoagent.plugin import policy_vanilla
+    from nanoagent.plugin import policy_product, policy_vanilla
 
     match = BUDGET.match(c.budget or "")
     assert match is not None and c.seed is not None  # check_runnable
     words = None if match["words"] is None else int(match["words"])
+    if c.selector == "sketch_bm25":
+        return policy_product.method(c, float(match["frac"]), words)
     options = {"idf": c.idf, "dedup": c.dedup, "twin": c.twin, "chunker": c.chunker, "fraction": float(match["frac"]), "max_words": words}
     options |= {"sketch_opts": c.sketch_opts or (), "backup": c.backup or "none"}  # the variant steps (sketches_variant)
     return functools.partial(policy_vanilla.select, **options, seed=c.seed)
@@ -188,15 +201,14 @@ def method(c: Components) -> str | Callable[[str, str], str]:
 
 def check_runnable(c: Components, runner: str) -> None:
     """Refuse, before any model call, a bot this NanoAgent cannot run as configured."""
-    if c.selector in NOT_YET:
-        raise NotImplementedError(f"harness.selector={c.selector!r} is defined but not implemented yet ({NOT_YET[c.selector]})")
     if c.selector == "bloom_chunk":
         unset = [name for name in BLOOM_CHUNK_READS if getattr(c, name) is None]
         if unset:
             raise ValueError(f"selector 'bloom_chunk' needs {', '.join(unset)}: set harness.bot=vanilla (or vanilla_a), or set each")
-        for name, package in NOT_YET_IN_BLOOM_CHUNK.items():
-            if getattr(c, name) not in (None, (), "none"):
-                raise NotImplementedError(f"harness.{name}={getattr(c, name)!r} is defined but not implemented yet for bloom_chunk ({package})")
+    if c.selector == "sketch_bm25":
+        from nanoagent.plugin import policy_product
+
+        policy_product.check(c)
     if c.query == "instructions+input" and runner != "agent":
         raise ValueError("harness.query instructions+input needs an agent task: a decide task has no single task input message")
     legacy_policy(c)

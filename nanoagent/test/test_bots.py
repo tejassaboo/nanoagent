@@ -85,19 +85,6 @@ def test_a_wrong_name_or_value_is_refused(fields: dict, message: str) -> None:
         resolve(harness(**fields))
 
 
-@pytest.mark.parametrize(
-    ("fields", "package"),
-    [
-        ({"bot": "vanilla", "stopwords": "light"}, "WP6"),
-        ({"bot": "product"}, "WP6"),
-        ({"bot": "optimal"}, "WP6"),
-    ],
-)
-def test_a_defined_but_unbuilt_component_fails_loudly(fields: dict, package: str) -> None:
-    with pytest.raises(NotImplementedError, match=f"not implemented yet .*{package}"):
-        bots.check_runnable(resolve(harness(**fields)), "agent")
-
-
 # Ladder rungs V-a, V-b, V-c (= vanilla), T and C0: a preset plus at most one override, and what each changes.
 RUNGS = {
     "V-a": ({"bot": "vanilla_a"}, {"idf": "none", "dedup": "none"}),
@@ -159,8 +146,7 @@ def test_bm25_with_a_budget_is_bm25_frac(plugin: Path) -> None:
     c = resolve(harness(selector="bm25", budget="frac:0.25"))
     assert bots.legacy_policy(c) == "bm25_frac:0.25"
     assert policy_text(plugin, bots.legacy_policy(c), SYSTEM) == policy_text(plugin, "bm25_frac:0.25", SYSTEM)
-    with pytest.raises(NotImplementedError, match="words"):
-        bots.check_runnable(resolve(harness(selector="bm25", budget="frac:0.35,words:1500")), "agent")
+    bots.check_runnable(resolve(harness(selector="bm25", budget="frac:0.35,words:1500")), "agent")  # test_product has the word cap
 
 
 def test_input_queries_need_an_agent_task() -> None:
