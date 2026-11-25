@@ -42,7 +42,7 @@ class NanoAgentConfig(Config):
     twin: str | None = None  # sketch, or exact (every sketch swapped for its exact structure)
     sketch_opts: list[str] | None = None  # any of probe_sizing, conservative_update, one_permutation, double_hash
     chunker: str | None = None  # plain or structured
-    budget: str | None = None  # frac:<f>, or frac:<f>,words:<n> (the smaller); null = the selector's own
+    budget: str | None = None  # frac:<f>[,above:<n>:<g>][,words:<w>] (plugin.bots.BUDGET); null = the selector's own
     backup: str | None = None  # none, or learned (a learned Bloom filter with a backup filter)
     stopwords: str | None = None  # none, or light (strip stopwords from the selected text)
     stop_on_submit: bool | None = None  # end an agent task right after its first accepted submit

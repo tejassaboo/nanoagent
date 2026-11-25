@@ -44,7 +44,9 @@ CHOICES: dict[str, tuple[str, ...]] = {
 }
 # Components that only a sketch selector reads.
 SKETCH_ONLY = ("idf", "dedup", "twin", "sketch_opts", "chunker", "backup", "stopwords", "seed")
-BUDGET = re.compile(r"\Afrac:(?P<frac>\d+(?:\.\d+)?)(?:,words:(?P<words>\d+))?\Z")
+# frac:<f>[,above:<n>:<g>][,words:<w>]: keep fraction f of the handbook's words, g instead when it has n words or more
+# (above: sketch_bm25 only), never more than w words (policy_product.budget_words).
+BUDGET = re.compile(r"\Afrac:(?P<frac>\d+(?:\.\d+)?)(?:,above:(?P<above>\d+):(?P<above_frac>\d+(?:\.\d+)?))?(?:,words:(?P<words>\d+))?\Z")
 _OFF = ("off", "false", "none", "")
 # The components bloom_chunk reads (each must be set).
 BLOOM_CHUNK_READS = ("idf", "dedup", "twin", "chunker", "budget", "seed")
@@ -61,7 +63,7 @@ class Components:
     twin: str | None = None
     sketch_opts: tuple[str, ...] | None = None
     chunker: str | None = None
-    budget: str | None = None  # frac:<f> or frac:<f>,words:<n> (the smaller of the two)
+    budget: str | None = None  # frac:<f>[,above:<n>:<g>][,words:<w>] (:data:`BUDGET`)
     backup: str | None = None
     stopwords: str | None = None
     stop_on_submit: bool = False
@@ -86,7 +88,9 @@ _VANILLA = Components(
 # V-c is vanilla, T is vanilla + twin exact and C0 is vanilla + chunker plain: each a preset plus one override.
 _VANILLA_A = dataclasses.replace(_VANILLA, idf="none", dedup="none")
 _VARIANT = dataclasses.replace(_VANILLA, sketch_opts=("probe_sizing", "conservative_update", "one_permutation"))
-_PRODUCT = dataclasses.replace(_VARIANT, selector="sketch_bm25", budget="frac:0.35,words:1500", stopwords="light", stop_on_submit=True)
+# Product budget (DECISIONS 14): 35% of a handbook under 5,000 words, 60% of one with 5,000 or more, no word cap. The
+# planned min(35%, 1,500 words) stays a side rung: product + budget frac:0.35,words:1500.
+_PRODUCT = dataclasses.replace(_VARIANT, selector="sketch_bm25", budget="frac:0.35,above:5000:0.60", stopwords="light", stop_on_submit=True)
 PRESETS: dict[str, Components] = {
     "off": Components(),
     "full": Components(selector="full"),
@@ -128,8 +132,12 @@ def _check(c: Components) -> None:
                 raise ValueError(f"harness.{name}={item!r}: use one of {list(allowed)}")
     if c.budget is not None:
         match = BUDGET.match(c.budget)
-        if match is None or not 0 < float(match["frac"]) <= 1 or (match["words"] is not None and int(match["words"]) < 1):
-            raise ValueError(f"harness.budget={c.budget!r}: use frac:<fraction in (0, 1]> or frac:<fraction>,words:<n>")
+        fractions = [float(match[k]) for k in ("frac", "above_frac") if match is not None and match[k] is not None]
+        counts = [int(match[k]) for k in ("above", "words") if match is not None and match[k] is not None]
+        if match is None or not all(0 < f <= 1 for f in fractions) or any(n < 1 for n in counts):
+            raise ValueError(f"harness.budget={c.budget!r}: use frac:<fraction in (0, 1]>[,above:<words>:<fraction>][,words:<n>]")
+        if match["above"] is not None and c.selector != "sketch_bm25":
+            raise ValueError(f"harness.budget={c.budget!r}: above:<words>:<fraction> applies to sketch_bm25 only")
     if c.selector not in SKETCH_SELECTORS:
         stray = [name for name in SKETCH_ONLY if getattr(c, name) is not None]
         if stray:
@@ -193,7 +201,8 @@ def _selector(c: Components) -> str | Callable[[str, str], str]:
     assert match is not None and c.seed is not None  # check_runnable
     words = None if match["words"] is None else int(match["words"])
     if c.selector == "sketch_bm25":
-        return policy_product.method(c, float(match["frac"]), words)
+        above = None if match["above"] is None else (int(match["above"]), float(match["above_frac"]))
+        return policy_product.method(c, float(match["frac"]), words, above)
     options = {"idf": c.idf, "dedup": c.dedup, "twin": c.twin, "chunker": c.chunker, "fraction": float(match["frac"]), "max_words": words}
     options |= {"sketch_opts": c.sketch_opts or (), "backup": c.backup or "none"}  # the variant steps (sketches_variant)
     return functools.partial(policy_vanilla.select, **options, seed=c.seed)

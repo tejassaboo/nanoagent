@@ -126,7 +126,7 @@ def test_product_and_optimal_run_and_differ_only_in_the_twin(plugin: Path) -> No
         c = resolve(harness(bot=name))
         bots.check_runnable(c, "agent")
         text = policy_text(plugin, bots.method(c), SYSTEM)
-        assert text == strip_light(policy_product.select(LONG, SYSTEM, **{**PRODUCT, "twin": twin}, fraction=0.35, max_words=1500))
+        assert text == strip_light(policy_product.select(LONG, SYSTEM, **{**PRODUCT, "twin": twin}, fraction=0.35, above=(5000, 0.6)))
         assert c.stop_on_submit and c.reasoning_effort is None  # PA4 is added only if probe G4 admits it
 
 
@@ -139,6 +139,7 @@ LADDER = {
     "L14": {"bot": "optimal"},
     "-PA1": {"bot": "product", "stop_on_submit": False},
     "-PA2": {"bot": "product", "budget": "frac:0.35"},
+    "PA2-cap": {"bot": "product", "budget": "frac:0.35,words:1500"},  # the planned min(35%, 1,500 words), a side rung
     "-PA3": {"bot": "product", "stopwords": "none"},
     "-dedup": {"bot": "product", "dedup": "none"},
     "+PA4": {"bot": "product", "reasoning_effort": "low"},
@@ -153,9 +154,77 @@ def test_each_product_rung_runs(rung: str, plugin: Path) -> None:
 
 
 def test_product_is_variant_with_the_selector_and_pa1_to_pa3() -> None:
-    changes = {"selector": "sketch_bm25", "stop_on_submit": True, "budget": "frac:0.35,words:1500", "stopwords": "light"}
+    changes = {"selector": "sketch_bm25", "stop_on_submit": True, "budget": "frac:0.35,above:5000:0.60", "stopwords": "light"}
     assert PRESETS["product"] == dataclasses.replace(PRESETS["variant"], **changes)
-    assert resolve(harness(**LADDER["L10"], budget="frac:0.35,words:1500")) == resolve(harness(**LADDER["L11"]))
+    assert PRESETS["optimal"] == dataclasses.replace(PRESETS["product"], twin="exact")
+    assert resolve(harness(**LADDER["L10"], budget="frac:0.35,above:5000:0.60")) == resolve(harness(**LADDER["L11"]))
+
+
+# -- the budget rule (DECISIONS 14) --------------------------------------------------------------------- #
+
+
+def sized(words: int) -> str:
+    """A handbook of exactly ``words`` words: LONG, then numbered airfare rules of distinct filler words."""
+    head = LONG.split()
+    rules, n = [], 0
+    while len(head) + sum(len(r.split()) for r in rules) + 45 <= words:
+        n += 1
+        rules.append(f"{n + 7}. Airfare rule {n}\nEconomy airfare rule {n} covers {' '.join(f'q{n}z{k}' for k in range(38))}.")  # no near-copies
+    text = LONG + "\n" + "\n".join(rules)
+    pad = words - len(text.split())
+    return text + " receipts" * pad
+
+
+def test_the_budget_is_35_percent_under_5000_words_and_60_percent_from_5000() -> None:
+    assert policy_product.budget_words(4999, 0.35, None, (5000, 0.6)) == int(0.35 * 4999) == 1749
+    assert policy_product.budget_words(5000, 0.35, None, (5000, 0.6)) == 3000
+    assert policy_product.budget_words(18988, 0.35, None, (5000, 0.6)) == int(0.6 * 18988)  # no word cap
+    assert policy_product.budget_words(18988, 0.35, 1500) == 1500 and policy_product.budget_words(4141, 0.35, 1500) == 1449
+
+
+@pytest.mark.parametrize(("words", "fraction"), [(4999, 0.35), (5000, 0.6)])
+def test_product_keeps_its_fraction_on_either_side_of_5000_words(words: int, fraction: float, tmp_path: Path) -> None:
+    handbook = sized(words)
+    assert len(handbook.split()) == words
+    (tmp_path / POLICY_FILE).write_text(handbook)
+    for bot in ("product", "optimal"):
+        c = resolve(harness(bot=bot))
+        method = bots.method(c)
+        _, kept = policy_product.chosen(handbook, INSTRUCTIONS, **{**PRODUCT, "twin": c.twin}, fraction=0.35, above=(5000, 0.6))
+        shown = sum(len(policy_product.units(handbook, "structured")[i][0].split()) for i in kept)
+        budget = int(fraction * words)
+        assert budget <= shown <= 1.05 * budget  # enough chunks score, so the selection fills the size rule's budget
+        expected = policy_product.select(handbook, INSTRUCTIONS, **{**PRODUCT, "twin": c.twin}, fraction=0.35, above=(5000, 0.6))
+        assert policy_text(tmp_path, method, INSTRUCTIONS) == strip_light(expected)
+
+
+def test_the_planned_word_cap_is_a_side_rung_of_product(tmp_path: Path) -> None:
+    handbook = sized(5000)
+    (tmp_path / POLICY_FILE).write_text(handbook)
+    c = resolve(harness(**LADDER["PA2-cap"]))
+    assert c == dataclasses.replace(PRESETS["product"], budget="frac:0.35,words:1500")
+    method = bots.method(c)
+    inner = method.args[0].keywords
+    assert method.func is policy_product.stripped and (inner["fraction"], inner["max_words"], inner["above"]) == (0.35, 1500, None)
+    text = policy_text(tmp_path, method, INSTRUCTIONS)
+    assert text == strip_light(policy_product.select(handbook, INSTRUCTIONS, **PRODUCT, fraction=0.35, max_words=1500))
+    product = policy_text(tmp_path, bots.method(resolve(harness(bot="product"))), INSTRUCTIONS)
+    assert len(text.split()) <= 1.05 * 1500 + len(policy_select.first_line(handbook).split()) < len(product.split())
+
+
+@pytest.mark.parametrize(
+    ("fields", "message"),
+    [
+        ({"bot": "vanilla", "budget": "frac:0.35,above:5000:0.60"}, "applies to sketch_bm25 only"),
+        ({"selector": "bm25", "budget": "frac:0.35,above:5000:0.60"}, "applies to sketch_bm25 only"),
+        ({"bot": "product", "budget": "frac:0.35,above:5000:1.5"}, r"use frac:<fraction in \(0, 1\]>"),
+        ({"bot": "product", "budget": "frac:0.35,above:0:0.6"}, r"use frac:<fraction in \(0, 1\]>"),
+        ({"bot": "product", "budget": "frac:0.35,words:1500,above:5000:0.6"}, r"use frac:<fraction in \(0, 1\]>"),
+    ],
+)
+def test_a_bad_size_rule_is_refused(fields: dict, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        resolve(harness(**fields))
 
 
 @pytest.mark.parametrize(

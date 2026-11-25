@@ -18,7 +18,10 @@ of chunk i (shared chunker), N chunks, avgdl = mean |d_i| (lengths are exact cou
   dedup     ``"minhash"``: a chunk whose estimated Jaccard with a kept chunk (word 3-shingles, K = 128, LSH 32 x 4)
             is >= 0.8 is skipped; one_permutation (VS3) signs with densified one-permutation hashing.
 VS1-VS3 are :mod:`sketches_variant`'s, the steps bloom_chunk takes too.
-Budget B = floor(fraction x handbook words), capped at ``max_words`` (the product's min(35%, 1,500 words)). Chunks
+Budget B = floor(f x W), W = the handbook's word count (whitespace-split, before any strip), f = ``fraction``, or
+``above``'s fraction g when ``above`` = (n, g) and W >= n; then capped at ``max_words`` when set (:func:`budget_words`).
+The product's ``budget: frac:0.35,above:5000:0.60`` is B = floor(0.35 W) for W < 5,000 and floor(0.60 W) otherwise,
+with no cap; the side rung ``frac:0.35,words:1500`` is the planned min(floor(0.35 W), 1,500). Chunks
 scoring > 0 are taken best first (ties: handbook order) while the word count stays within 1.05 B, stopping once B
 is reached, and shown as policy_select.bm25 shows them: handbook order after the title line, a later piece of a
 section without its title line when the piece before it is shown. ``stopwords: light`` then strips 27 function
@@ -128,15 +131,25 @@ def pick(texts: list[str], score: list[float], budget: int, near: NearDuplicates
     return sorted(kept)
 
 
+def budget_words(words: int, fraction: float, max_words: int | None = None, above: tuple[int, float] | None = None) -> int:
+    """B for a handbook of ``words`` words: floor(f x words), f = ``above``'s fraction when ``above`` = (n, g) and
+    words >= n, else ``fraction``; at most ``max_words`` when it is set."""
+    if above is not None and words >= above[0]:
+        fraction = above[1]
+    budget = int(fraction * words)
+    return budget if max_words is None else min(budget, max_words)
+
+
 def chosen(handbook: str, task_text: str, *, idf: str = "cms", dedup: str = "minhash", twin: str = "sketch", chunker: str = "structured",
-           fraction: float = 0.35, max_words: int | None = None, sketch_opts: tuple[str, ...] = (), seed: int = 580) -> tuple[list[tuple[str, int, int]], list[int]]:
-    """(the units, the indices kept)."""
+           fraction: float = 0.35, max_words: int | None = None, above: tuple[int, float] | None = None, sketch_opts: tuple[str, ...] = (),
+           seed: int = 580) -> tuple[list[tuple[str, int, int]], list[int]]:
+    """(the units, the indices kept), within :func:`budget_words` (``fraction``, ``max_words``, ``above``)."""
     exact, parts = twin == "exact", units(handbook, chunker)
     docs = [tokens(text) for text, _, _ in parts]
     score = scores(set(tokens(in_scope(task_text))), docs, idf, exact, tuple(sketch_opts), seed)
-    budget = int(fraction * len(handbook.split()))
+    budget = budget_words(len(handbook.split()), fraction, max_words, above)
     near = near_duplicates(exact, tuple(sketch_opts), seed) if dedup == "minhash" else None
-    return parts, pick([text for text, _, _ in parts], score, budget if max_words is None else min(budget, max_words), near)
+    return parts, pick([text for text, _, _ in parts], score, budget, near)
 
 
 def select(handbook: str, task_text: str, **options) -> str:
@@ -188,8 +201,8 @@ def check(c: Components) -> None:
         raise NotImplementedError(f"harness.backup={c.backup!r}, sketch_opts={c.sketch_opts!r}: only {list(OPTIONS)} run on sketch_bm25 (N1 and VS4 run on bloom_chunk)")
 
 
-def method(c: Components, fraction: float, max_words: int | None) -> Callable[[str, str], str]:
+def method(c: Components, fraction: float, max_words: int | None, above: tuple[int, float] | None = None) -> Callable[[str, str], str]:
     """The ``sketch_bm25`` selector :func:`nanoagent.plugin.policy.with_policy` runs for ``c``."""
     options = {"idf": c.idf, "dedup": c.dedup, "twin": c.twin, "chunker": c.chunker, "sketch_opts": tuple(c.sketch_opts or ())}
     assert c.seed is not None  # check
-    return functools.partial(select, **options, fraction=fraction, max_words=max_words, seed=c.seed)
+    return functools.partial(select, **options, fraction=fraction, max_words=max_words, above=above, seed=c.seed)
