@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from nanoagent.harness.nanoagent import NanoAgentConfig
-from nanoagent.plugin import bots
+from nanoagent.plugin import bots, policy_vanilla
 from nanoagent.plugin.bots import PRESETS, Components, resolve
 from nanoagent.plugin.policy import BUNDLED_POLICY_FILE, POLICY_FILE, TITLE, handbook_path, policy_text, selection_query, with_policy
 from test_policy_switch import HANDBOOK, SYSTEM
@@ -38,7 +38,7 @@ def test_yaml_off_in_any_form_is_off(written) -> None:
 
 
 def test_every_preset_resolves_and_full_plus_has_two_spellings() -> None:
-    for name in ("off", "full", "full_plus", "vanilla", "variant", "product", "optimal"):
+    for name in ("off", "full", "full_plus", "vanilla", "vanilla_a", "variant", "product", "optimal"):
         assert resolve(harness(bot=name)) == PRESETS[name]
     assert resolve(harness(bot="full+")) == PRESETS["full_plus"]
     assert PRESETS["full_plus"] == dataclasses.replace(PRESETS["full"], stop_on_submit=True)
@@ -85,10 +85,57 @@ def test_a_wrong_name_or_value_is_refused(fields: dict, message: str) -> None:
         resolve(harness(**fields))
 
 
-@pytest.mark.parametrize(("bot", "package"), [("vanilla", "WP4"), ("variant", "WP4"), ("product", "WP6"), ("optimal", "WP6")])
-def test_a_defined_but_unbuilt_component_fails_loudly(bot: str, package: str) -> None:
+@pytest.mark.parametrize(
+    ("fields", "package"),
+    [
+        ({"bot": "variant"}, "WP5"),
+        ({"bot": "vanilla", "backup": "learned"}, "WP5"),
+        ({"bot": "vanilla", "stopwords": "light"}, "WP6"),
+        ({"bot": "product"}, "WP6"),
+        ({"bot": "optimal"}, "WP6"),
+    ],
+)
+def test_a_defined_but_unbuilt_component_fails_loudly(fields: dict, package: str) -> None:
     with pytest.raises(NotImplementedError, match=f"not implemented yet .*{package}"):
-        bots.check_runnable(resolve(harness(bot=bot)), "agent")
+        bots.check_runnable(resolve(harness(**fields)), "agent")
+
+
+# Ladder rungs V-a, V-b, V-c (= vanilla), T and C0: a preset plus at most one override, and what each changes.
+RUNGS = {
+    "V-a": ({"bot": "vanilla_a"}, {"idf": "none", "dedup": "none"}),
+    "V-b": ({"bot": "vanilla_a", "idf": "cms"}, {"dedup": "none"}),
+    "V-c": ({"bot": "vanilla"}, {}),
+    "T": ({"bot": "vanilla", "twin": "exact"}, {"twin": "exact"}),
+    "C0": ({"bot": "vanilla", "chunker": "plain"}, {"chunker": "plain"}),
+}
+
+
+@pytest.mark.parametrize("rung", sorted(RUNGS))
+def test_each_vanilla_rung_is_a_preset_plus_one_override_and_runs(rung: str, plugin: Path) -> None:
+    fields, change = RUNGS[rung]
+    c = resolve(harness(**fields))
+    assert c == dataclasses.replace(PRESETS["vanilla"], **change)
+    bots.check_runnable(c, "agent")
+    text = policy_text(plugin, bots.method(c), SYSTEM)
+    assert text.startswith(HANDBOOK.splitlines()[0]) and "lowest logical airfare in economy class" in text
+    assert text == policy_vanilla.select(HANDBOOK, SYSTEM, **{**VANILLA_OPTIONS, **change, "seed": 580})
+
+
+VANILLA_OPTIONS = {"idf": "cms", "dedup": "minhash", "twin": "sketch", "chunker": "structured", "fraction": 0.35, "max_words": None}
+
+
+def test_bloom_chunk_without_a_preset_names_what_it_needs() -> None:
+    with pytest.raises(ValueError, match="'bloom_chunk' needs idf, dedup, twin, chunker, budget, seed"):
+        bots.check_runnable(resolve(harness(selector="bloom_chunk")), "agent")
+
+
+def test_v_b_has_two_spellings_and_the_seed_reaches_the_sketches(plugin: Path) -> None:
+    assert resolve(harness(bot="vanilla", dedup="none")) == resolve(harness(bot="vanilla_a", idf="cms"))
+    method = bots.method(resolve(harness(bot="vanilla", seed=583)))
+    assert method.keywords["seed"] == 583 and bots.method(resolve(harness(bot="vanilla"))).keywords["seed"] == 580
+    capped = bots.method(resolve(harness(bot="vanilla", budget="frac:0.5,words:30")))
+    assert (capped.keywords["fraction"], capped.keywords["max_words"]) == (0.5, 30)
+    assert len(policy_text(plugin, capped, SYSTEM).split()) <= 1.05 * 30 + len(HANDBOOK.splitlines()[0].split())
 
 
 def test_bm25_with_a_budget_is_bm25_frac(plugin: Path) -> None:
@@ -249,6 +296,19 @@ def test_an_upstream_run_config_sends_the_upstream_prompt_and_records_nothing_ne
     messages = json.loads((home / "messages.json").read_text())
     assert messages["final_metrics"]["extra"] == {"cost": 0.0, "stop_reason": "answer"}
     assert "harness:" not in (home / "run.log").read_text()
+
+
+def test_a_vanilla_run_sends_the_vanilla_selection_and_records_its_seed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from nanoagent.plugin import load_manifest
+    from nanoagent.plugin.tasks import task_prompt
+
+    model, home = _agent_run(tmp_path, monkeypatch, "  bot: vanilla\n  twin: exact\n  seed: 582\n")
+    manifest = load_manifest(tmp_path / "plugin")
+    system, _ = task_prompt(manifest, manifest.task("echo"), {"value": "hello"})
+    expected = policy_vanilla.select(HANDBOOK, system, **{**VANILLA_OPTIONS, "twin": "exact", "seed": 582})
+    assert model.requests[0][0][0]["content"] == f"{system}\n\n## {TITLE}\n\n{expected}"
+    record = json.loads((home / "messages.json").read_text())["final_metrics"]["extra"]["harness"]
+    assert record["bot"] == "vanilla" and record["components"]["seed"] == 582 and record["components"]["twin"] == "exact"
 
 
 def test_a_bot_run_records_its_components_hash_and_the_hosted_cap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

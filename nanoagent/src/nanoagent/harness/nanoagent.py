@@ -33,7 +33,7 @@ class NanoAgentConfig(Config):
     # Only plugin agent and decide tasks read it; every method uses the same model and tools.
     policy: str = "off"
     # A bot preset that sets every field below at once (nanoagent.plugin.bots.PRESETS): off, full,
-    # full_plus (or full+), vanilla, variant, product or optimal. Each field below that is not null
+    # full_plus (or full+), vanilla, vanilla_a (ladder rung V-a), variant, product or optimal. Each field below that is not null
     # replaces the preset's value; `policy` is the older name of `selector`. Quote "off" in YAML.
     bot: str = "off"
     selector: str | None = None  # off, full, bloom, scoped, rule_quota, bm25, bm25_frac[:f], bloom_chunk, sketch_bm25

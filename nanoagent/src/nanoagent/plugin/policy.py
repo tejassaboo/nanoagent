@@ -32,8 +32,11 @@ METHODS: dict[str, Callable[[str, str], str]] = {
 }
 
 
-def policy_text(root: Path, policy: str, task_text: str) -> str:
-    """The policy text for ``policy`` ("" for ``off``), read from the plugin folder ``root``, for the task ``task_text``."""
+def policy_text(root: Path, policy: str | Callable[[str, str], str], task_text: str) -> str:
+    """The policy text for ``policy`` ("" for ``off``), read from the plugin folder ``root``, for the task ``task_text``.
+    ``policy`` may also be a configured selector, a function of (handbook, task text) (``nanoagent.plugin.bots.method``)."""
+    if callable(policy):
+        return policy(handbook_path(root, "harness.selector").read_text(), task_text)
     # YAML 1.1 reads a bare `off` as false, so `policy: off` in a config arrives as False.
     if policy is False or policy is None or str(policy).lower() in ("off", "false", "none", ""):
         return ""
@@ -73,7 +76,7 @@ def selection_query(system_prompt: str, task_input: str, query: str) -> str:
     raise ValueError(f"unknown query {query!r}: use instructions or instructions+input")
 
 
-def with_policy(system_prompt: str, root: Path, policy: str, query_text: str | None = None) -> str:
+def with_policy(system_prompt: str, root: Path, policy: str | Callable[[str, str], str], query_text: str | None = None) -> str:
     """``system_prompt`` with the policy section added, unchanged when ``policy`` is ``off``.
     A method selects for ``query_text`` (default: the system prompt itself)."""
     text = policy_text(root, policy, system_prompt if query_text is None else query_text)

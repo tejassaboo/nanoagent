@@ -234,7 +234,7 @@ class PluginAgent(Run):
         manifest, task = _task(self.config, {"agent", "decide"})
         bot = bots.resolve(self.config.harness)
         bots.check_runnable(bot, task.runner)
-        policy = bots.legacy_policy(bot)
+        policy = bots.method(bot)
         # Recorded only when the config sets a switch field, so an upstream config's run is unchanged.
         record = None if bots.is_upstream(self.config.harness) else self._bot_record(bot, manifest)
         if record is not None:
