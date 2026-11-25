@@ -130,6 +130,8 @@ class Reply:
     # The model's separated reasoning / `<think>` trace when the backend provides it, else
     # None. Re-sent to the model as `reasoning_content` (see `assistant_message`).
     reasoning: str | None = None
+    # Who served the turn, when the backend knows (OpenRouter names its provider); else None.
+    provider: str | None = None
 
 
 class ChatModel(Protocol):
@@ -465,7 +467,7 @@ class Agent:
                             ),
                         )
                     model_record = profile_step.finish_model_call(
-                        model_call, usage=reply.usage, cost=reply.cost
+                        model_call, usage=reply.usage, cost=reply.cost, provider=reply.provider
                     )
                     pending["model"] += model_record.duration_s
                     _accumulate(usage, reply.usage)

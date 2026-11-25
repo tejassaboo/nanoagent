@@ -44,8 +44,8 @@ CHOICES: dict[str, tuple[str, ...]] = {
 SKETCH_ONLY = ("idf", "dedup", "twin", "sketch_opts", "chunker", "backup", "stopwords", "seed")
 BUDGET = re.compile(r"\Afrac:(?P<frac>\d+(?:\.\d+)?)(?:,words:(?P<words>\d+))?\Z")
 _OFF = ("off", "false", "none", "")
-# Components not wired into the run yet, with the package that adds them.
-NOT_YET = {"selector": "WP4 (bloom_chunk) / WP6 (sketch_bm25)", "reasoning_effort": "WP3"}
+# Selectors defined here but not run yet, with the package that adds them.
+NOT_YET = {"bloom_chunk": "WP4", "sketch_bm25": "WP6"}
 
 
 @dataclass(frozen=True)
@@ -164,14 +164,8 @@ def legacy_policy(c: Components) -> str:
 
 def check_runnable(c: Components, runner: str) -> None:
     """Refuse, before any model call, a bot this NanoAgent cannot run as configured."""
-    unbuilt = {
-        "selector": c.selector in SKETCH_SELECTORS,
-        "stop_on_submit": c.stop_on_submit,
-        "reasoning_effort": c.reasoning_effort is not None,
-    }
-    for name, asked in unbuilt.items():
-        if asked and name in NOT_YET:
-            raise NotImplementedError(f"harness.{name}={getattr(c, name)!r} is defined but not implemented yet ({NOT_YET[name]})")
+    if c.selector in NOT_YET:
+        raise NotImplementedError(f"harness.selector={c.selector!r} is defined but not implemented yet ({NOT_YET[c.selector]})")
     if c.query == "instructions+input" and runner != "agent":
         raise ValueError("harness.query instructions+input needs an agent task: a decide task has no single task input message")
     legacy_policy(c)

@@ -28,7 +28,7 @@ import json
 import shutil
 import sys
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -50,7 +50,7 @@ from nanoagent.plugin.scaffold import create_plugin
 from nanoagent.plugin.tasks import ModelDecider, run_task
 from nanoagent.plugin.verifier import Verification
 from nanoagent.runtime.build import build_agent
-from nanoagent.runtime.config import AgentDefinitionConfig
+from nanoagent.runtime.config import AgentDefinitionConfig, ModelConfig
 from nanoagent.trajectory.atif import AtifTrajectory, to_atif
 
 _USAGE = """usage:
@@ -182,6 +182,17 @@ def _print_event(kind: str, data: dict[str, Any]) -> None:
         print(f"decision: {json.dumps(data['answers'])} forced {json.dumps(data['forced'])}")
 
 
+def _with_reasoning(model: ModelConfig, effort: str | None) -> ModelConfig:
+    """``model`` asking for ``effort`` of reasoning (OpenRouter's ``reasoning.effort``); unchanged for None."""
+    if effort is None:
+        return model
+    if model.provider != "openrouter":
+        raise ValueError(f"harness.reasoning_effort is sent as OpenRouter's reasoning.effort; this model's provider is {model.provider!r}")
+    if any(item.partition("=")[0].strip() == "reasoning" for item in model.extra_body):
+        raise ValueError("harness.reasoning_effort and a `reasoning=` entry in llm.extra_body both set reasoning: keep one")
+    return replace(model, extra_body=[*model.extra_body, f'reasoning={{"effort": "{effort}"}}'])
+
+
 def _verdict(task: TaskDefinition, verification: Verification) -> PluginVerdict:
     return PluginVerdict(task=task.id, **verification.to_dict())
 
@@ -229,10 +240,12 @@ class PluginAgent(Run):
         if record is not None:
             print(f"harness: {json.dumps(record, sort_keys=True)}")
 
+        model = _with_reasoning(self.config.llm.runtime(), bot.reasoning_effort)
+
         def make_agent(system_prompt: str, task_input: str) -> Agent:
             prompt = with_policy(system_prompt, manifest.root, policy, selection_query(system_prompt, task_input, bot.query))
             definition = AgentDefinitionConfig(
-                model=self.config.llm.runtime(),
+                model=model,
                 agent=self.config.harness.runtime(system_prompt=prompt),
                 tools=[],
                 tools_dir=None,
@@ -245,7 +258,7 @@ class PluginAgent(Run):
 
             harness = self.config.harness
             return ModelDecider(
-                Model.from_config(self.config.llm.runtime()),
+                Model.from_config(model),
                 with_policy(system_prompt, manifest.root, policy),
                 max_steps=harness.max_steps,
                 cost_limit=harness.cost_limit,

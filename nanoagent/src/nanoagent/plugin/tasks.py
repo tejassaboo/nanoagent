@@ -145,7 +145,7 @@ class ModelDecider:
             step.finish_model_call(timer, error=f"{type(error).__name__}: {error}")
             step.finish()
             raise
-        record = step.finish_model_call(timer, usage=answer.usage, cost=answer.cost)
+        record = step.finish_model_call(timer, usage=answer.usage, cost=answer.cost, provider=answer.provider)
         step.finish()
         self._durations.append({"model": record.duration_s, "tools": 0.0})
         call = ToolCall(id=f"{ANSWER}-{len(self._durations)}", name=ANSWER, arguments=json.dumps(answer.value))

@@ -71,6 +71,12 @@ _DEFAULT_MAX_CONNECTIONS: int = 100
 _STREAM_OPTIONS: dict[str, bool] = {"include_usage": True}
 
 
+def _provider(obj: Any) -> str | None:
+    """The provider OpenRouter names on a response or stream chunk (top-level ``provider``); None elsewhere."""
+    provider = getattr(obj, "provider", None)
+    return provider if isinstance(provider, str) and provider else None
+
+
 def _reasoning_text(obj: Any) -> str | None:
     """Pull the ``<think>`` text out of a streaming delta or a final message, across SDK variations.
 
@@ -285,7 +291,7 @@ class ChatBackend:
         if not isinstance(value, dict):
             raise ValueError(f"the answer to {name!r} is not a JSON object: {value!r}")
         usage = self._usage(response)
-        return Answer(value=value, usage=usage, cost=self._cost(usage), finish_reason=finish_reason)
+        return Answer(value=value, usage=usage, cost=self._cost(usage), finish_reason=finish_reason, provider=_provider(response))
 
     async def _create_with_retry(self, kwargs: dict[str, Any]) -> Any:
         """One ``chat.completions.create`` call, retried with capped, jittered backoff (fail-fast on 4xx)."""
@@ -319,9 +325,11 @@ class ChatBackend:
         calls: dict[int, dict[str, Any]] = {}
         usage: dict[str, int] = {}
         finish_reason: str | None = None
+        provider: str | None = None
         async for chunk in stream:
             if getattr(chunk, "usage", None):
                 usage = self._usage(chunk)
+            provider = _provider(chunk) or provider
             if not chunk.choices:
                 continue
             choice = chunk.choices[0]
@@ -362,6 +370,7 @@ class ChatBackend:
             usage=usage,
             cost=self._cost(usage),
             finish_reason=finish_reason,
+            provider=provider,
         )
 
     def _to_response(self, response: Any) -> Response:
@@ -382,6 +391,7 @@ class ChatBackend:
             usage=usage,
             cost=self._cost(usage),
             finish_reason=getattr(choice, "finish_reason", None),
+            provider=_provider(response),
         )
 
     def _split_reasoning(

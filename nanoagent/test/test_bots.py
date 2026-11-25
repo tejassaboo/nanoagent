@@ -202,6 +202,7 @@ class _Submitting:
 
     def __init__(self) -> None:
         self.requests: list[tuple[list[dict], list[dict]]] = []
+        self.configs: list = []  # the model configs it was built from
 
     async def query(self, messages, tools, on_delta=None, **_):
         from nanoagent.core.agent import Reply, ToolCall
@@ -212,13 +213,13 @@ class _Submitting:
         return Reply(content="Submitted it.", usage={"total_tokens": 100})
 
 
-def _agent_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness_lines: str = "") -> tuple[_Submitting, Path]:
+def _agent_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness_lines: str = "", llm_lines: str = "") -> tuple[_Submitting, Path]:
     from nanoagent.cli import plugin as cli
     from nanoagent.runtime.model import Model
     from test_plugin import _echo_plugin
 
     model = _Submitting()
-    monkeypatch.setattr(Model, "from_config", classmethod(lambda _cls, cfg: model))
+    monkeypatch.setattr(Model, "from_config", classmethod(lambda _cls, cfg: model.configs.append(cfg) or model))
     monkeypatch.setattr(cli, "_arguments", lambda path, task: {"value": "hello"})
     root = _echo_plugin(tmp_path)
     manifest = root / "nanoagent.yaml"
@@ -227,7 +228,7 @@ def _agent_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, harness_lines: s
     config = tmp_path / "run.yaml"
     config.write_text(
         f"_ > nanoagent.cli.plugin.PluginOpenRouterAgentConfig:\nplugin: {root}\ntask: echo\narguments: unused.json\n"
-        f"inputs: []\ntimeout: 60.0\n{_LLM}{_HARNESS}{harness_lines}"
+        f"inputs: []\ntimeout: 60.0\n{_LLM}{llm_lines}{_HARNESS}{harness_lines}"
     )
     home = tmp_path / "run"
     monkeypatch.setattr(sys, "argv", ["nanoagent", "plugin", "agent"])
@@ -270,6 +271,21 @@ def test_full_plus_stops_at_the_accepted_submit_and_full_asks_once_more(tmp_path
     assert (len(plus.requests), len(full.requests)) == (1, 2)
     assert plus.requests[0][0] == full.requests[0][0]
     assert json.loads((home / "messages.json").read_text())["final_metrics"]["extra"]["stop_reason"] == "submitted"
+
+
+def test_the_llm_extra_body_and_reasoning_effort_reach_the_model_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from nanoagent.runtime.config import parse_kv_list
+
+    pin = """  extra_body: ['provider={"order": ["baidu/fp8"], "allow_fallbacks": false, "quantizations": ["fp8"]}']\n"""
+    model, home = _agent_run(tmp_path, monkeypatch, "  reasoning_effort: low\n", pin)
+    assert parse_kv_list(model.configs[0].extra_body) == {
+        "provider": {"order": ["baidu/fp8"], "allow_fallbacks": False, "quantizations": ["fp8"]},
+        "reasoning": {"effort": "low"},
+    }
+    record = json.loads((home / "messages.json").read_text())["final_metrics"]["extra"]["harness"]
+    assert record["components"]["reasoning_effort"] == "low" and record["llm"]["extra_body"] == [pin.split("'")[1]]
+    upstream, _ = _agent_run(tmp_path / "upstream", monkeypatch)
+    assert upstream.configs[0].extra_body == []
 
 
 def test_a_misspelt_harness_key_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

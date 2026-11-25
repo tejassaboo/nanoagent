@@ -1,6 +1,6 @@
 """OpenRouter LLM configuration."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from omegaconf import MISSING
 from slimconfig import Config
@@ -17,6 +17,10 @@ class OpenRouterConfig(Config):
     read_timeout: float = MISSING
     input_price: float = MISSING
     output_price: float = MISSING
+    # Extra request-body fields as key=value tokens (see nanoagent.runtime.config.parse_kv_list),
+    # e.g. ['provider={"order": ["baidu/fp8"], "allow_fallbacks": false, "quantizations": ["fp8"]}']
+    # to pin the serving provider. [] sends nothing extra.
+    extra_body: list[str] = field(default_factory=list)
 
     def runtime(self) -> ModelConfig:
         # A null base_url and api_key: the client uses OpenRouter's endpoint and OPENROUTER_API_KEY.
@@ -31,7 +35,7 @@ class OpenRouterConfig(Config):
             max_tokens=self.max_tokens,
             request_timeout=self.read_timeout,
             max_retries=self.max_attempts - 1,
-            extra_body=[],
+            extra_body=list(self.extra_body),
             input_price=self.input_price,
             output_price=self.output_price,
         )

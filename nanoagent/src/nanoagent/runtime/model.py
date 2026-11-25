@@ -106,4 +106,5 @@ def _to_reply(response: Response) -> Reply:
         usage=response.usage,
         cost=response.cost,
         reasoning=response.reasoning,
+        provider=response.provider,
     )

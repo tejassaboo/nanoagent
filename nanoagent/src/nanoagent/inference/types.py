@@ -148,6 +148,8 @@ class Response:
     # for a text provider with no tokenizer named — not an empty list, which would read as "the
     # model emitted nothing".
     tokens: Tokens | None = None
+    # who served it, when the gateway reports it (OpenRouter's response `provider`, e.g. "Baidu")
+    provider: str | None = None
 
 
 @dataclass(slots=True)
@@ -158,3 +160,4 @@ class Answer:
     usage: dict[str, int] = field(default_factory=dict)
     cost: float = 0.0
     finish_reason: str | None = None
+    provider: str | None = None

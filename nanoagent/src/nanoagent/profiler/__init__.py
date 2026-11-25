@@ -93,7 +93,23 @@ def normalize_usage(raw: Any) -> dict[str, int]:
         reasoning = _first_number(raw, "reasoning_tokens", "reasoning")
     if reasoning is not None:
         usage["reasoning_tokens"] = reasoning
+
+    # OpenRouter bills each request and reports it in USD beside the tokens: `cost` is what the key
+    # is charged, `cost_details.upstream_inference_cost` what the provider charged. Kept as
+    # integer nano-dollars, so they add up across calls like the token counts.
+    billed = _dollars(_field(raw, "cost"))
+    if billed is not None:
+        usage["billed_cost_nanousd"] = billed
+    upstream = _dollars(_field(_field(raw, "cost_details"), "upstream_inference_cost"))
+    if upstream is not None:
+        usage["upstream_cost_nanousd"] = upstream
     return usage
+
+
+def _dollars(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return round(value * 1e9)
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +126,8 @@ class ModelCallProfile:
     cost: float
     error: str | None = None
     started: float | None = None
+    # Who served the call, when the gateway says (OpenRouter's `provider`, e.g. "Baidu").
+    provider: str | None = None
 
     @property
     def output_tokens_per_second(self) -> float | None:
@@ -128,6 +146,8 @@ class ModelCallProfile:
             "usage": dict(self.usage),
             "cost": self.cost,
             "error": self.error,
+            # Only when known, so a backend that names no provider keeps its record unchanged.
+            **({"provider": self.provider} if self.provider is not None else {}),
         }
 
 
@@ -226,7 +246,14 @@ class RunProfile:
             "usage": dict(self.usage),
             "cost": self.cost,
             "steps": [step.to_dict() for step in self.steps],
+            **({"providers": self.providers} if self.providers else {}),
         }
+
+    @property
+    def providers(self) -> list[str]:
+        """Every provider that served one of the run's model calls, in first-seen order."""
+        seen = (call.provider for step in self.steps for call in step.model_calls if call.provider is not None)
+        return list(dict.fromkeys(seen))
 
 
 @dataclass(slots=True)
@@ -250,6 +277,7 @@ class _ModelCallTimer:
         usage: Mapping[str, int] | None = None,
         cost: float = 0.0,
         error: str | None = None,
+        provider: str | None = None,
     ) -> ModelCallProfile:
         ended = self.clock()
         ttft = None if self.first_delta is None else max(0.0, self.first_delta - self.started)
@@ -263,6 +291,7 @@ class _ModelCallTimer:
             cost=cost,
             error=error,
             started=self.started,
+            provider=provider,
         )
 
 
@@ -306,8 +335,9 @@ class StepProfiler:
         usage: Mapping[str, int] | None = None,
         cost: float = 0.0,
         error: str | None = None,
+        provider: str | None = None,
     ) -> ModelCallProfile:
-        record = timer.finish(usage=usage, cost=cost, error=error)
+        record = timer.finish(usage=usage, cost=cost, error=error, provider=provider)
         # A failed attempt is not a completed turn, but the time it took was spent on the model.
         (self._model_calls if error is None else self._failed_model_calls).append(record)
         return record
