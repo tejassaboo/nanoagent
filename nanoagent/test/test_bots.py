@@ -88,8 +88,6 @@ def test_a_wrong_name_or_value_is_refused(fields: dict, message: str) -> None:
 @pytest.mark.parametrize(
     ("fields", "package"),
     [
-        ({"bot": "variant"}, "WP5"),
-        ({"bot": "vanilla", "backup": "learned"}, "WP5"),
         ({"bot": "vanilla", "stopwords": "light"}, "WP6"),
         ({"bot": "product"}, "WP6"),
         ({"bot": "optimal"}, "WP6"),
@@ -122,6 +120,25 @@ def test_each_vanilla_rung_is_a_preset_plus_one_override_and_runs(rung: str, plu
 
 
 VANILLA_OPTIONS = {"idf": "cms", "dedup": "minhash", "twin": "sketch", "chunker": "structured", "fraction": 0.35, "max_words": None}
+
+
+# The variant rungs: +VS1 is vanilla plus one override, variant is vanilla plus VS1-VS3, VS4 is a flag on either.
+VARIANT_RUNGS = {
+    "+VS1": ({"bot": "vanilla", "sketch_opts": ["probe_sizing"]}, {"sketch_opts": ("probe_sizing",)}),
+    "variant": ({"bot": "variant"}, {"sketch_opts": ("probe_sizing", "conservative_update", "one_permutation")}),
+    "VS4": ({"bot": "variant", "backup": "learned"}, {"sketch_opts": ("probe_sizing", "conservative_update", "one_permutation"), "backup": "learned"}),
+}
+
+
+@pytest.mark.parametrize("rung", sorted(VARIANT_RUNGS))
+def test_each_variant_rung_runs_its_sketch_opts(rung: str, plugin: Path) -> None:
+    fields, change = VARIANT_RUNGS[rung]
+    c = resolve(harness(**fields))
+    assert c == dataclasses.replace(PRESETS["vanilla"], **change)
+    bots.check_runnable(c, "agent")
+    assert bots.method(c).keywords["sketch_opts"] == change["sketch_opts"]
+    expected = policy_vanilla.select(HANDBOOK, SYSTEM, **{**VANILLA_OPTIONS, "seed": 580, "backup": "none", **change})
+    assert policy_text(plugin, bots.method(c), SYSTEM) == expected
 
 
 def test_bloom_chunk_without_a_preset_names_what_it_needs() -> None:

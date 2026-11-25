@@ -50,7 +50,7 @@ _OFF = ("off", "false", "none", "")
 NOT_YET = {"sketch_bm25": "WP6"}
 # The components bloom_chunk reads (each must be set), and values it does not run yet, with their package.
 BLOOM_CHUNK_READS = ("idf", "dedup", "twin", "chunker", "budget", "seed")
-NOT_YET_IN_BLOOM_CHUNK = {"sketch_opts": "WP5", "backup": "WP5", "stopwords": "WP6"}
+NOT_YET_IN_BLOOM_CHUNK = {"stopwords": "WP6"}
 
 
 @dataclass(frozen=True)
@@ -182,6 +182,7 @@ def method(c: Components) -> str | Callable[[str, str], str]:
     assert match is not None and c.seed is not None  # check_runnable
     words = None if match["words"] is None else int(match["words"])
     options = {"idf": c.idf, "dedup": c.dedup, "twin": c.twin, "chunker": c.chunker, "fraction": float(match["frac"]), "max_words": words}
+    options |= {"sketch_opts": c.sketch_opts or (), "backup": c.backup or "none"}  # the variant steps (sketches_variant)
     return functools.partial(policy_vanilla.select, **options, seed=c.seed)
 
 
